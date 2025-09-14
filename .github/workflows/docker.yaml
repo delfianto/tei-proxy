@@ -2,8 +2,8 @@ name: Build and Push Docker image
 
 on:
   push:
-    branches: ["main"]    # Run only when pushing to main branch
-  workflow_dispatch:      # Allow manual trigger
+    branches: ["main"]   # Run when pushing to main
+  workflow_dispatch:     # Allow manual trigger
 
 jobs:
   docker:
@@ -11,11 +11,14 @@ jobs:
 
     permissions:
       contents: read
-      packages: write     # needed to push to GHCR
+      packages: write    # Needed to push to GHCR
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -27,15 +30,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set short SHA
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
+          platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository_owner }}/rerank-proxy:latest
             ghcr.io/${{ github.repository_owner }}/rerank-proxy:${{ env.SHORT_SHA }}
-          platforms: linux/amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Tiny Rust proxy for TEI reranker API
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}

@@ -19,11 +19,6 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 # -------- Stage 2: Minimal Runtime --------
 FROM scratch
 
-# OCI image labels
-LABEL org.opencontainers.image.source="https://github.com/delfianto/tei-reranker-proxy"
-LABEL org.opencontainers.image.description="Tiny Rust proxy for TEI reranker API"
-LABEL org.opencontainers.image.licenses="MIT"
-
 # Copy only the binary, nothing else
 COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/rerank-proxy /rerank-proxy
 
