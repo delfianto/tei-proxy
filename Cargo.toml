@@ -1,0 +1,21 @@
+[package]
+name = "rerank-proxy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.47.1", features = ["full"] }
+warp = "0.3.7"
+serde = { version = "1.0.221", features = ["derive"] }
+serde_json = "1.0.144"
+reqwest = { version = "0.12.23", features = ["json"] }
+log = "0.4.28"
+env_logger = "0.11.8"
+anyhow = "1.0.99"
+
+[profile.release]
+codegen-units = 1   # Better optimization
+lto = true          # Link-time optimization
+opt-level = "z"     # Optimize for size
+panic = "abort"     # Smaller binary
+strip = true        # Remove debug symbols
