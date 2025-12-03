@@ -37,11 +37,11 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/rerank-proxy:latest
-            ghcr.io/${{ github.repository_owner }}/rerank-proxy:${{ env.SHORT_SHA }}
+            ghcr.io/${{ github.repository_owner }}/tei-proxy:latest
+            ghcr.io/${{ github.repository_owner }}/tei-proxy:${{ env.SHORT_SHA }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Tiny Rust proxy for TEI reranker API
+            org.opencontainers.image.description=Tiny proxy for Hugginface TEI API
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
