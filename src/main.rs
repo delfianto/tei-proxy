@@ -151,7 +151,7 @@ async fn main() {
     let v1_embeddings = warp::path("v1")
         .and(warp::path("embeddings"))
         .and(embed_handler.clone());
-    let short_embed = warp::path("embed").and(embed_handler.clone());
+    let short_embed = warp::path("embeddings").and(embed_handler.clone());
 
     // CORS
     let cors = warp::cors()
