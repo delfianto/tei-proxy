@@ -1,5 +1,5 @@
 # -------- Stage 1: Builder --------
-FROM rust:1.82 AS builder
+FROM rust:1.85 AS builde
 WORKDIR /app
 
 # Install musl tools (for musl target builds)
