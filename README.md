@@ -1,59 +1,49 @@
-# Rerank Proxy
+# TEI Proxy
 
-A lightweight Rust proxy that bridges **Open WebUI** requests with **Huggingface Text Embeddings Inference (TEI)** rerank service.
-It normalizes request/response formats and enforces batch limits for the API.
+A lightweight Rust proxy that bridges **Open WebUI** requests with **HuggingFace Text Embeddings Inference (TEI)** for reranking and embeddings.
 
-There's an open [GitHub issue](https://github.com/huggingface/text-embeddings-inference/issues/683) for this, and while waiting for the final implementation from the TEI maintainer; I decide to wrote this small proxy.
+There's an open [GitHub issue](https://github.com/huggingface/text-embeddings-inference/issues/683) for native OpenAI-compatible rerank support in TEI. This proxy fills that gap.
 
----
+## Features
 
-## ✨ Features
+- Translates OpenWebUI/OpenAI-style rerank requests to TEI format
+- Passthrough proxy for embeddings (preserves upstream responses)
+- Configurable batch limits, timeouts, and auth
+- Request ID tracking for debugging
+- Deep health checks with upstream status
+- Graceful shutdown on SIGINT
+- CORS-enabled for browser clients
 
-- Accepts OpenWebUI-style rerank requests (`query` + `documents`).
-- Transforms requests into TEI-compatible format.
-- Validates input (non-empty query, non-empty documents).
-- Enforces configurable max batch size (`MAX_CLIENT_BATCH_SIZE`).
-- Handles TEI errors gracefully (timeouts, bad responses, mismatches).
-- Provides structured JSON error responses.
-- Includes `/health` endpoint for readiness checks.
-- CORS-enabled for browser-based clients.
-- Logging via `env_logger`.
+## Configuration
 
----
+| Variable                | Default                      | Description                        |
+| ----------------------- | ---------------------------- | ---------------------------------- |
+| `TEI_ENDPOINT`          | `http://localhost:4000`      | Legacy fallback for both services  |
+| `RERANKING_HOST`        | (falls back to TEI_ENDPOINT) | Rerank service URL                 |
+| `RERANKING_API_KEY`     | (none)                       | Bearer token for rerank service    |
+| `EMBEDDING_HOST`        | (falls back to TEI_ENDPOINT) | Embedding service URL              |
+| `EMBEDDING_API_KEY`     | (none)                       | Bearer token for embedding service |
+| `TEI_PROXY_PORT`        | `8000`                       | Port this proxy listens on         |
+| `MAX_CLIENT_BATCH_SIZE` | `1000`                       | Max documents per rerank request   |
+| `RERANK_TIMEOUT_SECS`   | `30`                         | Timeout for rerank requests        |
+| `EMBED_TIMEOUT_SECS`    | `60`                         | Timeout for embedding requests     |
 
-## ⚙️ Configuration
+**Auth priority:** Environment API key > Client `Authorization` header
 
-Set the following environment variables:
-
-| Variable                | Default                 | Description                                     |
-| ----------------------- | ----------------------- | ----------------------------------------------- |
-| `TEI_ENDPOINT`          | `http://localhost:4000` | Base URL of the TEI service                     |
-| `TEI_PROXY_PORT`        | `8000`                  | Port where this proxy will listen               |
-| `MAX_CLIENT_BATCH_SIZE` | `1000`                  | Maximum allowed number of documents per request |
-
----
-
-## 🚀 Running
-
-### With Cargo
+## Running
 
 ```bash
-# Build & run
-cargo run
-```
+# Development
+RUST_LOG=debug cargo run
 
-### With Environment Variables
-
-```bash
-TEI_ENDPOINT="http://tei:4000" \
-TEI_PROXY_PORT=8080 \
+# Production
+RERANKING_HOST="http://tei-rerank:4000" \
+EMBEDDING_HOST="http://tei-embed:4000" \
 MAX_CLIENT_BATCH_SIZE=500 \
 cargo run --release
 ```
 
----
-
-## 📡 API
+## API
 
 ### Health Check
 
@@ -61,87 +51,68 @@ cargo run --release
 GET /health
 ```
 
-Response:
+Returns upstream connectivity status:
 
 ```json
 {
     "status": "healthy",
-    "service": "rerank-proxy"
+    "service": "tei-proxy",
+    "upstreams": { "rerank": true, "embed": true },
+    "supported_endpoints": [
+        "/v1/rerank",
+        "/v1/embeddings",
+        "/rerank",
+        "/embeddings"
+    ]
 }
 ```
-
----
 
 ### Rerank
 
 ```
 POST /rerank
-Content-Type: application/json
+POST /v1/rerank
 ```
 
-#### Request (OpenWebUI format)
+**Request (OpenWebUI format):**
 
 ```json
 {
     "query": "example search",
     "documents": ["doc1", "doc2", "doc3"],
-    "model": "optional-model-name",
+    "model": "optional-ignored",
     "top_n": 2
 }
 ```
 
-#### Transformed TEI Request
-
-```json
-{
-    "query": "example search",
-    "texts": ["doc1", "doc2", "doc3"]
-}
-```
-
-#### Response
+**Response:**
 
 ```json
 {
     "results": [
         { "index": 1, "relevance_score": 0.87 },
-        { "index": 0, "relevance_score": 0.42 },
-        { "index": 2, "relevance_score": 0.15 }
+        { "index": 0, "relevance_score": 0.42 }
     ]
 }
 ```
 
-#### Error Example
+### Embeddings
 
-```json
-{
-    "error": "bad_request",
-    "message": "Documents list cannot be empty"
-}
+```
+POST /embeddings
+POST /v1/embeddings
 ```
 
----
+Pure passthrough to upstream TEI `/v1/embeddings` endpoint. Request and response formats are preserved.
 
-## 🛠 Development
-
-### Prerequisites
-
-- Rust (edition 2021+)
-- Cargo
-- A running TEI service (e.g. HuggingFace’s `text-embeddings-inference` Docker image)
-
-### Logs
-
-Enable debug logs:
+## Testing
 
 ```bash
-RUST_LOG=debug cargo run
+cargo test
 ```
 
----
+Tests use [wiremock](https://github.com/LukeMathWalker/wiremock-rs) for mocking upstream services.
 
-## 📜 License
+## License
 
 MIT
-
----

@@ -1,22 +1,26 @@
 [package]
 name = "rerank-proxy"
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
+description = "Lightweight proxy bridging OpenWebUI to HuggingFace TEI rerank/embedding services"
 
 [dependencies]
 log = "0.4"
 warp = "0.3"
-anyhow = "1.0"
 env_logger = "0.11"
-serde_json = "1.0"
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 
-tokio = { version = "1.0", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+[dev-dependencies]
+wiremock = "0.6"
+
 [profile.release]
-codegen-units = 1   # Better optimization
-lto = true          # Link-time optimization
-opt-level = "z"     # Optimize for size
-panic = "abort"     # Smaller binary
-strip = true        # Remove debug symbols
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
