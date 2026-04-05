@@ -42,9 +42,22 @@ pub async fn handle_rerank(
         ))));
     }
 
+    let texts: Vec<String> = req.documents.into_iter().map(|doc| {
+        if let Some(s) = doc.as_str() {
+            s.to_string()
+        } else if let Some(content) = doc.get("page_content").and_then(|v| v.as_str()) {
+            content.to_string()
+        } else if let Some(text) = doc.get("text").and_then(|v| v.as_str()) {
+            text.to_string()
+        } else {
+            doc.to_string()
+        }
+    }).collect();
+
     let tei_req = TEIRerankRequest {
         query: req.query,
-        texts: req.documents.clone(),
+        texts,
+        truncate: req.truncate.unwrap_or(true),
     };
 
     let tei_url = format!("{}/rerank", config.endpoint.trim_end_matches('/'));
@@ -251,9 +264,10 @@ mod tests {
         async fn test_empty_query_rejected() {
             let req = RerankRequest {
                 query: "   ".to_string(),
-                documents: vec!["doc".to_string()],
+                documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let result = handle_rerank(
@@ -277,6 +291,7 @@ mod tests {
                 documents: vec![],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let result = handle_rerank(
@@ -297,9 +312,10 @@ mod tests {
         async fn test_batch_size_exceeded_rejected() {
             let req = RerankRequest {
                 query: "query".to_string(),
-                documents: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                documents: vec![serde_json::json!("a"), serde_json::json!("b"), serde_json::json!("c")],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let result = handle_rerank(
@@ -329,7 +345,8 @@ mod tests {
                 .and(path("/rerank"))
                 .and(body_json(serde_json::json!({
                     "query": "test query",
-                    "texts": ["doc1", "doc2", "doc3"]
+                    "texts": ["doc1", "doc2", "doc3"],
+                    "truncate": true
                 })))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
                     {"index": 0, "score": 0.5},
@@ -341,9 +358,10 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test query".to_string(),
-                documents: vec!["doc1".to_string(), "doc2".to_string(), "doc3".to_string()],
+                documents: vec![serde_json::json!("doc1"), serde_json::json!("doc2"), serde_json::json!("doc3")],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let result = handle_rerank(
@@ -376,9 +394,10 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test".to_string(),
-                documents: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                documents: vec![serde_json::json!("a"), serde_json::json!("b"), serde_json::json!("c")],
                 model: None,
                 top_n: Some(2),
+                truncate: None,
             };
 
             let result = handle_rerank(
@@ -411,9 +430,10 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test".to_string(),
-                documents: vec!["doc".to_string()],
+                documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let result = handle_rerank(
@@ -446,9 +466,10 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test".to_string(),
-                documents: vec!["doc".to_string()],
+                documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let config = ServiceConfig {
@@ -482,9 +503,10 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test".to_string(),
-                documents: vec!["doc".to_string()],
+                documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                truncate: None,
             };
 
             let result = handle_rerank(

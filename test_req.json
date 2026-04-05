@@ -1,0 +1,7 @@
+{
+    "model": "model_name",
+    "query": "query string",
+    "documents": [
+         "text 1", null
+    ]
+}

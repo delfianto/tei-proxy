@@ -88,11 +88,13 @@ impl ProxyConfig {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RerankRequest {
     pub query: String,
-    pub documents: Vec<String>,
+    pub documents: Vec<serde_json::Value>,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub top_n: Option<usize>,
+    #[serde(default)]
+    pub truncate: Option<bool>,
 }
 
 /// TEI Rerank Request (internal transform)
@@ -100,6 +102,7 @@ pub struct RerankRequest {
 pub struct TEIRerankRequest {
     pub query: String,
     pub texts: Vec<String>,
+    pub truncate: bool,
 }
 
 /// TEI Rerank Response (internal)
@@ -150,13 +153,11 @@ pub async fn handle_rejection(
             ApiError::BadRequest(msg) => (400, msg.clone(), "bad_request"),
             ApiError::UpstreamError(msg) => (502, msg.clone(), "upstream_error"),
         }
-    } else if err
-        .find::<warp::filters::body::BodyDeserializeError>()
-        .is_some()
-    {
+    } else if let Some(e) = err.find::<warp::filters::body::BodyDeserializeError>() {
+        log::error!("Body deserialize error: {}", e);
         (
             400,
-            "Invalid JSON in request body".to_string(),
+            format!("Invalid JSON in request body: {}", e),
             "invalid_json",
         )
     } else {
@@ -328,6 +329,7 @@ mod tests {
             let req = TEIRerankRequest {
                 query: "search".to_string(),
                 texts: vec!["doc1".to_string(), "doc2".to_string()],
+                truncate: true,
             };
             let json = serde_json::to_string(&req).unwrap();
 

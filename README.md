@@ -32,6 +32,18 @@ There's an open [GitHub issue](https://github.com/huggingface/text-embeddings-in
 
 ## Running
 
+### TEI Requirements
+When running the HuggingFace TEI docker container alongside this proxy, ensure you set `--max-client-batch-size` to be greater than or equal to the proxy's `MAX_CLIENT_BATCH_SIZE` (default 1000) to prevent `413 Payload Too Large` errors. You should also enable `--auto-truncate`.
+
+```bash
+docker run -p 8080:80 ghcr.io/huggingface/text-embeddings-inference:1.9.2 \
+    --model-id BAAI/bge-reranker-base \
+    --max-client-batch-size 1000 \
+    --auto-truncate
+```
+
+### Proxy
+
 ```bash
 # Development
 RUST_LOG=debug cargo run
