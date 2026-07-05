@@ -1,8 +1,16 @@
 [package]
-name = "rerank-proxy"
+name = "tei-proxy"
 version = "0.2.0"
 edition = "2024"
 description = "Lightweight proxy bridging OpenWebUI to HuggingFace TEI rerank/embedding services"
+
+[lib]
+name = "tei_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tei-proxy"
+path = "src/main.rs"
 
 [dependencies]
 log = "0.4"
