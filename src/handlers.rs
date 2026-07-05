@@ -3,14 +3,18 @@ use reqwest::Client;
 use std::time::Duration;
 
 use crate::types::{
-    ApiError, RankResult, RerankRequest, RerankResponse, ServiceConfig, TEIRerankRequest,
-    TEIRerankResponse,
+    ApiError, CohereApiVersion, CohereBilledUnits, CohereMeta, CohereRerankResponse,
+    JinaRerankResponse, OpenWebUIRerankResponse, RankDocument, RankResult, RerankFlavor,
+    RerankRequest, RerankUsage, ServiceConfig, TEIRerankRequest, TEIRerankResponse,
 };
 
 // --- Rerank Handler ---
 
+// Arguments mirror the warp filter chain, which extracts them positionally
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_rerank(
     req: RerankRequest,
+    flavor: RerankFlavor,
     config: ServiceConfig,
     client: Client,
     client_auth: Option<String>,
@@ -19,8 +23,9 @@ pub async fn handle_rerank(
     request_id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     info!(
-        "[{}] Rerank request: {} documents",
+        "[{}] Rerank request ({:?}): {} documents",
         request_id,
+        flavor,
         req.documents.len()
     );
 
@@ -42,17 +47,7 @@ pub async fn handle_rerank(
         ))));
     }
 
-    let texts: Vec<String> = req.documents.into_iter().map(|doc| {
-        if let Some(s) = doc.as_str() {
-            s.to_string()
-        } else if let Some(content) = doc.get("page_content").and_then(|v| v.as_str()) {
-            content.to_string()
-        } else if let Some(text) = doc.get("text").and_then(|v| v.as_str()) {
-            text.to_string()
-        } else {
-            doc.to_string()
-        }
-    }).collect();
+    let texts: Vec<String> = req.documents.iter().map(extract_document_text).collect();
 
     let tei_req = TEIRerankRequest {
         query: req.query,
@@ -93,31 +88,115 @@ pub async fn handle_rerank(
         ))
     })?;
 
-    let mut indexed_scores: Vec<(usize, f64)> = tei_response
+    let indexed_scores: Vec<(usize, f64)> = tei_response
         .0
         .into_iter()
         .map(|r| (r.index, r.score))
         .collect();
 
-    indexed_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let reply = match flavor {
+        RerankFlavor::OpenWebUI => {
+            let results = to_rank_results(full_coverage_by_index(indexed_scores), None);
+            info!(
+                "[{}] Rerank complete: {} results",
+                request_id,
+                results.len()
+            );
+            warp::reply::json(&OpenWebUIRerankResponse { results })
+        }
+        RerankFlavor::Jina => {
+            let texts = req
+                .return_documents
+                .unwrap_or(false)
+                .then_some(tei_req.texts.as_slice());
+            let results = to_rank_results(sort_and_limit(indexed_scores, req.top_n), texts);
+            info!(
+                "[{}] Rerank complete: {} results",
+                request_id,
+                results.len()
+            );
+            warp::reply::json(&JinaRerankResponse {
+                object: "rerank",
+                model: req.model.unwrap_or_else(|| "tei-reranker".to_string()),
+                usage: estimate_usage(&tei_req),
+                results,
+            })
+        }
+        RerankFlavor::Cohere => {
+            let results = to_rank_results(sort_and_limit(indexed_scores, req.top_n), None);
+            info!(
+                "[{}] Rerank complete: {} results",
+                request_id,
+                results.len()
+            );
+            warp::reply::json(&CohereRerankResponse {
+                id: request_id,
+                results,
+                meta: CohereMeta {
+                    api_version: CohereApiVersion { version: "2" },
+                    billed_units: CohereBilledUnits { search_units: 1 },
+                },
+            })
+        }
+    };
 
-    let limit = req.top_n.unwrap_or(indexed_scores.len());
-    let results: Vec<RankResult> = indexed_scores
+    Ok(reply)
+}
+
+/// Accepts the document shapes seen in the wild: plain strings (current
+/// OpenWebUI), objects with `page_content` (legacy OpenWebUI / LangChain) or
+/// `text` (Jina), and anything else as its raw JSON representation.
+pub fn extract_document_text(doc: &serde_json::Value) -> String {
+    if let Some(s) = doc.as_str() {
+        s.to_string()
+    } else if let Some(content) = doc.get("page_content").and_then(|v| v.as_str()) {
+        content.to_string()
+    } else if let Some(text) = doc.get("text").and_then(|v| v.as_str()) {
+        text.to_string()
+    } else {
+        doc.to_string()
+    }
+}
+
+/// Jina/Cohere semantics: results ordered by relevance, limited to top_n.
+fn sort_and_limit(mut scores: Vec<(usize, f64)>, top_n: Option<usize>) -> Vec<(usize, f64)> {
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    if let Some(n) = top_n {
+        scores.truncate(n);
+    }
+    scores
+}
+
+/// OpenWebUI zips the returned scores positionally against its documents,
+/// so every document must get a result back — top_n is deliberately ignored.
+fn full_coverage_by_index(mut scores: Vec<(usize, f64)>) -> Vec<(usize, f64)> {
+    scores.sort_by_key(|r| r.0);
+    scores
+}
+
+fn to_rank_results(scores: Vec<(usize, f64)>, texts: Option<&[String]>) -> Vec<RankResult> {
+    scores
         .into_iter()
-        .take(limit)
         .map(|(index, score)| RankResult {
             index,
             relevance_score: score,
+            document: texts
+                .and_then(|t| t.get(index))
+                .map(|text| RankDocument { text: text.clone() }),
         })
-        .collect();
+        .collect()
+}
 
-    info!(
-        "[{}] Rerank complete: {} results",
-        request_id,
-        results.len()
-    );
-
-    Ok(warp::reply::json(&RerankResponse { results }))
+/// TEI's /rerank response carries no token counts; approximate with the
+/// ~4 chars/token heuristic (each doc is scored as a query+doc pair).
+fn estimate_usage(req: &TEIRerankRequest) -> RerankUsage {
+    let chars =
+        req.query.len() * req.texts.len() + req.texts.iter().map(String::len).sum::<usize>();
+    let tokens = (chars / 4).max(1);
+    RerankUsage {
+        prompt_tokens: tokens,
+        total_tokens: tokens,
+    }
 }
 
 // --- Embedding Handler (Passthrough) ---
@@ -208,7 +287,14 @@ pub async fn handle_health(
                 "rerank": rerank_ok,
                 "embed": embed_ok
             },
-            "supported_endpoints": ["/v1/rerank", "/v1/embeddings", "/rerank", "/embeddings"]
+            "endpoints": {
+                "rerank": {
+                    "openwebui": ["/openwebui/rerank"],
+                    "jina": ["/jina/rerank", "/v1/rerank"],
+                    "cohere": ["/cohere/rerank", "/v2/rerank"]
+                },
+                "embeddings": ["/v1/embeddings", "/embeddings"]
+            }
         })),
         warp::http::StatusCode::from_u16(code).unwrap(),
     ))
@@ -267,11 +353,13 @@ mod tests {
                 documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config("http://localhost:9999"),
                 test_client(),
                 None,
@@ -291,11 +379,13 @@ mod tests {
                 documents: vec![],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config("http://localhost:9999"),
                 test_client(),
                 None,
@@ -315,11 +405,13 @@ mod tests {
                 documents: vec![serde_json::json!("a"), serde_json::json!("b"), serde_json::json!("c")],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config("http://localhost:9999"),
                 test_client(),
                 None,
@@ -361,11 +453,13 @@ mod tests {
                 documents: vec![serde_json::json!("doc1"), serde_json::json!("doc2"), serde_json::json!("doc3")],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config(&mock_server.uri()),
                 test_client(),
                 None,
@@ -397,11 +491,13 @@ mod tests {
                 documents: vec![serde_json::json!("a"), serde_json::json!("b"), serde_json::json!("c")],
                 model: None,
                 top_n: Some(2),
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config(&mock_server.uri()),
                 test_client(),
                 None,
@@ -433,11 +529,13 @@ mod tests {
                 documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config(&mock_server.uri()),
                 test_client(),
                 Some("Bearer test-token".to_string()),
@@ -469,6 +567,7 @@ mod tests {
                 documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
@@ -479,6 +578,7 @@ mod tests {
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 config,
                 test_client(),
                 Some("Bearer client-key".to_string()), // This should be ignored
@@ -506,11 +606,13 @@ mod tests {
                 documents: vec![serde_json::json!("doc")],
                 model: None,
                 top_n: None,
+                return_documents: None,
                 truncate: None,
             };
 
             let result = handle_rerank(
                 req,
+                RerankFlavor::Jina,
                 test_config(&mock_server.uri()),
                 test_client(),
                 None,
@@ -610,25 +712,290 @@ mod tests {
         }
     }
 
-    mod result_sorting {
-        #[test]
-        fn test_scores_sorted_descending() {
-            let mut scores = vec![(0, 0.5), (1, 0.9), (2, 0.3)];
-            scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    mod document_extraction {
+        use super::*;
 
-            assert_eq!(scores[0], (1, 0.9));
-            assert_eq!(scores[1], (0, 0.5));
-            assert_eq!(scores[2], (2, 0.3));
+        #[test]
+        fn test_plain_string() {
+            assert_eq!(extract_document_text(&serde_json::json!("hello")), "hello");
         }
 
         #[test]
-        fn test_top_n_truncation() {
-            let scores = vec![(1, 0.9), (0, 0.5), (2, 0.3)];
-            let top_2: Vec<_> = scores.into_iter().take(2).collect();
+        fn test_page_content_object() {
+            let doc = serde_json::json!({"page_content": "content", "metadata": {"k": "v"}});
+            assert_eq!(extract_document_text(&doc), "content");
+        }
 
-            assert_eq!(top_2.len(), 2);
-            assert_eq!(top_2[0], (1, 0.9));
-            assert_eq!(top_2[1], (0, 0.5));
+        #[test]
+        fn test_text_object() {
+            let doc = serde_json::json!({"text": "jina style"});
+            assert_eq!(extract_document_text(&doc), "jina style");
+        }
+
+        #[test]
+        fn test_page_content_wins_over_text() {
+            let doc = serde_json::json!({"page_content": "primary", "text": "secondary"});
+            assert_eq!(extract_document_text(&doc), "primary");
+        }
+
+        #[test]
+        fn test_unknown_shape_falls_back_to_raw_json() {
+            let doc = serde_json::json!({"title": "no known keys"});
+            assert_eq!(extract_document_text(&doc), r#"{"title":"no known keys"}"#);
+        }
+
+        #[test]
+        fn test_non_string_scalars_fall_back_to_raw_json() {
+            assert_eq!(extract_document_text(&serde_json::json!(42)), "42");
+            assert_eq!(extract_document_text(&serde_json::json!(null)), "null");
+        }
+
+        #[test]
+        fn test_non_string_page_content_falls_through() {
+            // page_content that isn't a string must not be picked up
+            let doc = serde_json::json!({"page_content": 7, "text": "fallback"});
+            assert_eq!(extract_document_text(&doc), "fallback");
+        }
+    }
+
+    mod result_shaping {
+        use super::*;
+
+        #[test]
+        fn test_sort_and_limit_orders_by_relevance() {
+            let scores = vec![(0, 0.5), (1, 0.9), (2, 0.3)];
+            let sorted = sort_and_limit(scores, None);
+
+            assert_eq!(sorted, vec![(1, 0.9), (0, 0.5), (2, 0.3)]);
+        }
+
+        #[test]
+        fn test_sort_and_limit_truncates_to_top_n() {
+            let scores = vec![(0, 0.5), (1, 0.9), (2, 0.3)];
+            let top_2 = sort_and_limit(scores, Some(2));
+
+            assert_eq!(top_2, vec![(1, 0.9), (0, 0.5)]);
+        }
+
+        #[test]
+        fn test_sort_and_limit_top_n_larger_than_input_returns_all() {
+            let scores = vec![(0, 0.5), (1, 0.9)];
+            let all = sort_and_limit(scores, Some(10));
+
+            assert_eq!(all.len(), 2);
+        }
+
+        #[test]
+        fn test_sort_and_limit_top_n_zero_returns_empty() {
+            let scores = vec![(0, 0.5), (1, 0.9)];
+            let none = sort_and_limit(scores, Some(0));
+
+            assert!(none.is_empty());
+        }
+
+        #[test]
+        fn test_sort_and_limit_handles_tied_scores() {
+            let scores = vec![(0, 0.5), (1, 0.5), (2, 0.5)];
+            let sorted = sort_and_limit(scores, None);
+
+            // No panic, all retained, scores unchanged
+            assert_eq!(sorted.len(), 3);
+            assert!(sorted.iter().all(|&(_, s)| s == 0.5));
+        }
+
+        #[test]
+        fn test_full_coverage_empty_input() {
+            assert!(full_coverage_by_index(vec![]).is_empty());
+        }
+
+        #[test]
+        fn test_full_coverage_keeps_all_scores_in_index_order() {
+            let scores = vec![(2, 0.3), (0, 0.5), (1, 0.9)];
+            let covered = full_coverage_by_index(scores);
+
+            // OpenWebUI zips scores positionally: every index must be present
+            assert_eq!(covered, vec![(0, 0.5), (1, 0.9), (2, 0.3)]);
+        }
+
+        #[test]
+        fn test_to_rank_results_without_documents() {
+            let results = to_rank_results(vec![(1, 0.9)], None);
+
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].index, 1);
+            assert_eq!(results[0].relevance_score, 0.9);
+            assert!(results[0].document.is_none());
+        }
+
+        #[test]
+        fn test_to_rank_results_attaches_original_document_text() {
+            let texts = vec!["first".to_string(), "second".to_string()];
+            let results = to_rank_results(vec![(1, 0.9), (0, 0.5)], Some(&texts));
+
+            assert_eq!(
+                results[0].document,
+                Some(RankDocument {
+                    text: "second".to_string()
+                })
+            );
+            assert_eq!(
+                results[1].document,
+                Some(RankDocument {
+                    text: "first".to_string()
+                })
+            );
+        }
+
+        #[test]
+        fn test_to_rank_results_out_of_range_index_yields_no_document() {
+            // If TEI ever returned an index beyond the input, don't panic
+            let texts = vec!["only one".to_string()];
+            let results = to_rank_results(vec![(5, 0.9)], Some(&texts));
+
+            assert_eq!(results[0].index, 5);
+            assert!(results[0].document.is_none());
+        }
+
+        #[test]
+        fn test_estimate_usage_minimum_is_one_token() {
+            let req = TEIRerankRequest {
+                query: String::new(),
+                texts: vec![],
+                truncate: true,
+            };
+            let usage = estimate_usage(&req);
+
+            assert_eq!(usage.prompt_tokens, 1);
+            assert_eq!(usage.total_tokens, 1);
+        }
+
+        #[test]
+        fn test_estimate_usage_counts_query_once_per_document() {
+            let one_doc = TEIRerankRequest {
+                query: "querytext".to_string(), // 9 chars
+                texts: vec!["x".repeat(100)],
+                truncate: true,
+            };
+            let two_docs = TEIRerankRequest {
+                query: "querytext".to_string(),
+                texts: vec!["x".repeat(100), "x".repeat(100)],
+                truncate: true,
+            };
+
+            let one = estimate_usage(&one_doc).prompt_tokens;
+            let two = estimate_usage(&two_docs).prompt_tokens;
+
+            // Each doc is scored as a (query, doc) pair, so the query's
+            // chars count once per document: 2*(100+9)/4 > 2*(100)/4 + 9/4
+            assert_eq!(one, (100 + 9) / 4);
+            assert_eq!(two, (2 * (100 + 9)) / 4);
+        }
+
+        #[test]
+        fn test_estimate_usage_is_nonzero() {
+            let req = TEIRerankRequest {
+                query: "query".to_string(),
+                texts: vec!["some document".to_string()],
+                truncate: true,
+            };
+            let usage = estimate_usage(&req);
+
+            assert!(usage.prompt_tokens > 0);
+            assert_eq!(usage.prompt_tokens, usage.total_tokens);
+        }
+    }
+
+    mod flavor_integration {
+        use super::*;
+
+        fn three_doc_request(top_n: Option<usize>) -> RerankRequest {
+            RerankRequest {
+                query: "test".to_string(),
+                documents: vec![
+                    serde_json::json!("a"),
+                    serde_json::json!("b"),
+                    serde_json::json!("c"),
+                ],
+                model: None,
+                top_n,
+                return_documents: None,
+                truncate: None,
+            }
+        }
+
+        async fn mock_tei() -> MockServer {
+            let mock_server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/rerank"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                    {"index": 0, "score": 0.5},
+                    {"index": 1, "score": 0.9},
+                    {"index": 2, "score": 0.3}
+                ])))
+                .mount(&mock_server)
+                .await;
+            mock_server
+        }
+
+        #[tokio::test]
+        async fn test_openwebui_flavor_succeeds_with_top_n() {
+            let mock_server = mock_tei().await;
+
+            // OpenWebUI sends top_n = len(documents); the shim ignores it
+            let result = handle_rerank(
+                three_doc_request(Some(1)),
+                RerankFlavor::OpenWebUI,
+                test_config(&mock_server.uri()),
+                test_client(),
+                None,
+                1000,
+                Duration::from_secs(5),
+                "test-id".to_string(),
+            )
+            .await;
+
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn test_cohere_flavor_succeeds() {
+            let mock_server = mock_tei().await;
+
+            let result = handle_rerank(
+                three_doc_request(Some(2)),
+                RerankFlavor::Cohere,
+                test_config(&mock_server.uri()),
+                test_client(),
+                None,
+                1000,
+                Duration::from_secs(5),
+                "test-id".to_string(),
+            )
+            .await;
+
+            assert!(result.is_ok());
+        }
+
+        #[tokio::test]
+        async fn test_jina_flavor_with_return_documents() {
+            let mock_server = mock_tei().await;
+
+            let mut req = three_doc_request(None);
+            req.return_documents = Some(true);
+
+            let result = handle_rerank(
+                req,
+                RerankFlavor::Jina,
+                test_config(&mock_server.uri()),
+                test_client(),
+                None,
+                1000,
+                Duration::from_secs(5),
+                "test-id".to_string(),
+            )
+            .await;
+
+            assert!(result.is_ok());
         }
     }
 }

@@ -20,9 +20,9 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 FROM scratch
 
 # Copy only the binary, nothing else
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/rerank-proxy /rerank-proxy
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/tei-proxy /tei-proxy
 
 # Run as non-root user for security
 USER 1000
 
-ENTRYPOINT ["/rerank-proxy"]
+ENTRYPOINT ["/tei-proxy"]

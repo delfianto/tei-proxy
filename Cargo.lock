@@ -1301,21 +1301,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rerank-proxy"
-version = "0.2.0"
-dependencies = [
- "env_logger",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
- "warp",
- "wiremock",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1559,6 +1544,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tei-proxy"
+version = "0.2.0"
+dependencies = [
+ "env_logger",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "warp",
+ "wiremock",
 ]
 
 [[package]]

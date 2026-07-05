@@ -84,7 +84,18 @@ impl ProxyConfig {
 
 // --- Request/Response Types ---
 
-/// OpenWebUI / OpenAI-style Rerank Request
+/// Which public API shape a rerank route speaks. TEI upstream is adding
+/// Jina (/v1/rerank) and Cohere (/v2/rerank) compatibility in PR #797;
+/// OpenWebUI's ExternalReranker needs stricter guarantees than either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RerankFlavor {
+    Jina,
+    Cohere,
+    OpenWebUI,
+}
+
+/// Rerank request accepted on all flavors (superset of Jina / Cohere /
+/// OpenWebUI fields; unknown fields are ignored by serde).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RerankRequest {
     pub query: String,
@@ -93,6 +104,8 @@ pub struct RerankRequest {
     pub model: Option<String>,
     #[serde(default)]
     pub top_n: Option<usize>,
+    #[serde(default)]
+    pub return_documents: Option<bool>,
     #[serde(default)]
     pub truncate: Option<bool>,
 }
@@ -115,9 +128,43 @@ pub struct TEIRerankResult {
     pub score: f64,
 }
 
-/// Public Rerank Response
+/// Jina-compatible response (/v1/rerank, /rerank) — mirrors TEI PR #797
 #[derive(Serialize, Debug)]
-pub struct RerankResponse {
+pub struct JinaRerankResponse {
+    pub object: &'static str,
+    pub model: String,
+    pub usage: RerankUsage,
+    pub results: Vec<RankResult>,
+}
+
+/// Cohere v2-compatible response (/v2/rerank) — mirrors TEI PR #797
+#[derive(Serialize, Debug)]
+pub struct CohereRerankResponse {
+    pub id: String,
+    pub results: Vec<RankResult>,
+    pub meta: CohereMeta,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CohereMeta {
+    pub api_version: CohereApiVersion,
+    pub billed_units: CohereBilledUnits,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CohereApiVersion {
+    pub version: &'static str,
+}
+
+#[derive(Serialize, Debug)]
+pub struct CohereBilledUnits {
+    pub search_units: usize,
+}
+
+/// Bare response for the strict OpenWebUI shim (/openwebui/rerank).
+/// OpenWebUI only reads `results[].{index, relevance_score}`.
+#[derive(Serialize, Debug)]
+pub struct OpenWebUIRerankResponse {
     pub results: Vec<RankResult>,
 }
 
@@ -125,6 +172,19 @@ pub struct RerankResponse {
 pub struct RankResult {
     pub index: usize,
     pub relevance_score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<RankDocument>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct RankDocument {
+    pub text: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RerankUsage {
+    pub prompt_tokens: usize,
+    pub total_tokens: usize,
 }
 
 #[derive(Serialize, Debug)]
@@ -338,16 +398,26 @@ mod tests {
         }
 
         #[test]
-        fn test_rerank_response_serialize() {
-            let resp = RerankResponse {
+        fn test_rerank_request_deserialize_return_documents() {
+            let json = r#"{"query": "q", "documents": ["a"], "return_documents": true}"#;
+            let req: RerankRequest = serde_json::from_str(json).unwrap();
+
+            assert_eq!(req.return_documents, Some(true));
+        }
+
+        #[test]
+        fn test_openwebui_response_serialize_bare() {
+            let resp = OpenWebUIRerankResponse {
                 results: vec![
                     RankResult {
                         index: 1,
                         relevance_score: 0.9,
+                        document: None,
                     },
                     RankResult {
                         index: 0,
                         relevance_score: 0.5,
+                        document: None,
                     },
                 ],
             };
@@ -355,6 +425,56 @@ mod tests {
 
             assert!(json.contains(r#""index":1"#));
             assert!(json.contains(r#""relevance_score":0.9"#));
+            // OpenWebUI shim must not leak extra keys or null documents
+            assert!(!json.contains("document"));
+            assert!(!json.contains("usage"));
+            assert!(!json.contains("model"));
+        }
+
+        #[test]
+        fn test_jina_response_serialize() {
+            let resp = JinaRerankResponse {
+                object: "rerank",
+                model: "bge-reranker".to_string(),
+                usage: RerankUsage {
+                    prompt_tokens: 10,
+                    total_tokens: 10,
+                },
+                results: vec![RankResult {
+                    index: 0,
+                    relevance_score: 0.9,
+                    document: Some(RankDocument {
+                        text: "doc text".to_string(),
+                    }),
+                }],
+            };
+            let json = serde_json::to_string(&resp).unwrap();
+
+            assert!(json.contains(r#""object":"rerank""#));
+            assert!(json.contains(r#""model":"bge-reranker""#));
+            assert!(json.contains(r#""prompt_tokens":10"#));
+            assert!(json.contains(r#""document":{"text":"doc text"}"#));
+        }
+
+        #[test]
+        fn test_cohere_response_serialize() {
+            let resp = CohereRerankResponse {
+                id: "req-123".to_string(),
+                results: vec![RankResult {
+                    index: 0,
+                    relevance_score: 0.9,
+                    document: None,
+                }],
+                meta: CohereMeta {
+                    api_version: CohereApiVersion { version: "2" },
+                    billed_units: CohereBilledUnits { search_units: 1 },
+                },
+            };
+            let json = serde_json::to_string(&resp).unwrap();
+
+            assert!(json.contains(r#""id":"req-123""#));
+            assert!(json.contains(r#""api_version":{"version":"2"}"#));
+            assert!(json.contains(r#""billed_units":{"search_units":1}"#));
         }
 
         #[test]
