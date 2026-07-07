@@ -1,6 +1,7 @@
 use log::info;
 use tei_proxy::routes::build_routes;
 use tei_proxy::types::ProxyConfig;
+use tokio::signal::unix::{SignalKind, signal};
 
 #[tokio::main]
 async fn main() {
@@ -38,12 +39,18 @@ async fn main() {
     let routes = build_routes(config.clone(), http_client);
 
     // --- Graceful Shutdown ---
+    // Docker sends SIGTERM on stop, and as PID 1 in the scratch image an
+    // unhandled signal is ignored outright (the kernel applies no default
+    // action for init), so the container would ride out the full stop grace
+    // period and get SIGKILLed. Listen for SIGTERM alongside Ctrl+C (SIGINT).
     let (tx, rx) = tokio::sync::oneshot::channel();
 
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
     tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to listen for Ctrl+C");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = sigterm.recv() => {},
+        }
         info!("Shutdown signal received");
         let _ = tx.send(());
     });
