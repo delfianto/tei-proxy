@@ -72,9 +72,11 @@ async fn require_live() {
 }
 
 async fn post_json(
-    routes: &(impl warp::Filter<Extract = (impl warp::Reply + 'static,), Error = warp::Rejection>
-          + Clone
-          + 'static),
+    routes: &(
+         impl warp::Filter<Extract = (impl warp::Reply + 'static,), Error = warp::Rejection>
+         + Clone
+         + 'static
+     ),
     path: &str,
     body: &serde_json::Value,
 ) -> (u16, serde_json::Value) {

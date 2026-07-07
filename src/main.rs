@@ -8,6 +8,15 @@ async fn main() {
 
     let config = ProxyConfig::from_env();
 
+    // Self-check mode for the Docker HEALTHCHECK: the runtime image is FROM
+    // scratch (no shell, no curl), so the binary probes its own /health
+    // endpoint — a deep check that includes both TEI upstreams — and exits
+    // 0 (healthy) or 1 (degraded/unreachable).
+    if std::env::args().any(|arg| arg == "--healthcheck") {
+        let healthy = tei_proxy::handlers::self_check(config.port).await;
+        std::process::exit(if healthy { 0 } else { 1 });
+    }
+
     info!("Starting TEI proxy on port {}", config.port);
     info!(
         "Rerank: {} (auth: {})",
