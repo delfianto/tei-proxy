@@ -25,4 +25,10 @@ COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/tei-proxy /tei
 # Run as non-root user for security
 USER 1000
 
+# Exec-form only: scratch has no shell. The binary re-invokes itself in
+# self-check mode and probes its own /health (deep check incl. upstreams).
+# Long start-period tolerates TEI upstreams loading models at stack boot.
+HEALTHCHECK --interval=10s --timeout=10s --retries=5 --start-period=120s \
+    CMD ["/tei-proxy", "--healthcheck"]
+
 ENTRYPOINT ["/tei-proxy"]

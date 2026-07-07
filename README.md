@@ -67,6 +67,11 @@ cargo run --release
 GET /health
 ```
 
+For container healthchecks, `tei-proxy --healthcheck` probes this endpoint
+in-process and exits 0/1 — the runtime image is `FROM scratch`, so the binary
+itself is the only available HTTP client. The Dockerfile ships a matching
+`HEALTHCHECK` instruction, so Docker reports container health out of the box.
+
 Returns upstream connectivity status:
 
 ```json

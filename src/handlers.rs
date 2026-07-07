@@ -300,6 +300,25 @@ pub async fn handle_health(
     ))
 }
 
+/// Probe the proxy's own `/health` endpoint and report whether it answered
+/// 200. Backs the binary's `--healthcheck` flag: the runtime image is
+/// `FROM scratch`, so the binary itself is the only thing inside the
+/// container that can make the request for a Docker HEALTHCHECK. Returns
+/// false on a degraded (503) response, connection error, or timeout. The
+/// timeout leaves headroom for handle_health's two sequential 3s upstream
+/// probes.
+pub async fn self_check(port: u16) -> bool {
+    let Ok(client) = Client::builder().timeout(Duration::from_secs(8)).build() else {
+        return false;
+    };
+    client
+        .get(format!("http://127.0.0.1:{}/health", port))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
 // --- Helpers ---
 
 fn apply_auth(
@@ -402,7 +421,11 @@ mod tests {
         async fn test_batch_size_exceeded_rejected() {
             let req = RerankRequest {
                 query: "query".to_string(),
-                documents: vec![serde_json::json!("a"), serde_json::json!("b"), serde_json::json!("c")],
+                documents: vec![
+                    serde_json::json!("a"),
+                    serde_json::json!("b"),
+                    serde_json::json!("c"),
+                ],
                 model: None,
                 top_n: None,
                 return_documents: None,
@@ -450,7 +473,11 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test query".to_string(),
-                documents: vec![serde_json::json!("doc1"), serde_json::json!("doc2"), serde_json::json!("doc3")],
+                documents: vec![
+                    serde_json::json!("doc1"),
+                    serde_json::json!("doc2"),
+                    serde_json::json!("doc3"),
+                ],
                 model: None,
                 top_n: None,
                 return_documents: None,
@@ -488,7 +515,11 @@ mod tests {
 
             let req = RerankRequest {
                 query: "test".to_string(),
-                documents: vec![serde_json::json!("a"), serde_json::json!("b"), serde_json::json!("c")],
+                documents: vec![
+                    serde_json::json!("a"),
+                    serde_json::json!("b"),
+                    serde_json::json!("c"),
+                ],
                 model: None,
                 top_n: Some(2),
                 return_documents: None,
@@ -996,6 +1027,43 @@ mod tests {
             .await;
 
             assert!(result.is_ok());
+        }
+    }
+
+    mod self_check {
+        use super::*;
+
+        async fn mock_health(status: u16) -> MockServer {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/health"))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+            server
+        }
+
+        #[tokio::test]
+        async fn test_self_check_healthy() {
+            let server = mock_health(200).await;
+            assert!(self_check(server.address().port()).await);
+        }
+
+        #[tokio::test]
+        async fn test_self_check_degraded_is_unhealthy() {
+            let server = mock_health(503).await;
+            assert!(!self_check(server.address().port()).await);
+        }
+
+        #[tokio::test]
+        async fn test_self_check_unreachable_is_unhealthy() {
+            // Bind then drop a listener to get a port with nothing on it
+            let port = std::net::TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            assert!(!self_check(port).await);
         }
     }
 }

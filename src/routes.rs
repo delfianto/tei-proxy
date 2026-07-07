@@ -52,8 +52,10 @@ pub fn build_routes(
             .and(request_id)
             .and_then(
                 |req, flavor, config, client, auth, max_batch, timeout, req_id| async move {
-                    handle_rerank(req, flavor, config, client, auth, max_batch, timeout, req_id)
-                        .await
+                    handle_rerank(
+                        req, flavor, config, client, auth, max_batch, timeout, req_id,
+                    )
+                    .await
                 },
             )
     };
@@ -146,9 +148,11 @@ mod tests {
     }
 
     async fn post_json(
-        routes: &(impl Filter<Extract = (impl warp::Reply + 'static,), Error = warp::Rejection>
-              + Clone
-              + 'static),
+        routes: &(
+             impl Filter<Extract = (impl warp::Reply + 'static,), Error = warp::Rejection>
+             + Clone
+             + 'static
+         ),
         route_path: &str,
         body: &serde_json::Value,
     ) -> (u16, serde_json::Value) {
@@ -279,7 +283,8 @@ mod tests {
             let tei = mock_tei_rerank().await;
             let routes = build_routes(test_config(&tei.uri(), &tei.uri()), Client::new());
 
-            let (status, json) = post_json(&routes, "/jina/rerank", &three_docs_body(Some(2))).await;
+            let (status, json) =
+                post_json(&routes, "/jina/rerank", &three_docs_body(Some(2))).await;
 
             assert_eq!(status, 200);
             assert_eq!(json["object"], "rerank");
@@ -654,8 +659,12 @@ mod tests {
             let tei = mock_tei_embed().await;
             let routes = build_routes(test_config(&tei.uri(), &tei.uri()), Client::new());
 
-            let (status, json) =
-                post_json(&routes, "/v1/embeddings", &serde_json::json!(["not", "object"])).await;
+            let (status, json) = post_json(
+                &routes,
+                "/v1/embeddings",
+                &serde_json::json!(["not", "object"]),
+            )
+            .await;
 
             assert_eq!(status, 400);
             assert_eq!(json["error"], "bad_request");
@@ -726,10 +735,7 @@ mod tests {
                 .mount(&tei)
                 .await;
             // Rerank upstream unreachable, embed healthy
-            let routes = build_routes(
-                test_config("http://127.0.0.1:9", &tei.uri()),
-                Client::new(),
-            );
+            let routes = build_routes(test_config("http://127.0.0.1:9", &tei.uri()), Client::new());
 
             let resp = warp::test::request()
                 .method("GET")
