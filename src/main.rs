@@ -55,11 +55,13 @@ async fn main() {
         let _ = tx.send(());
     });
 
-    let (_, server) =
-        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], config.port), async {
+    warp::serve(routes)
+        .bind(([0, 0, 0, 0], config.port))
+        .await
+        .graceful(async {
             rx.await.ok();
-        });
-
-    server.await;
+        })
+        .run()
+        .await;
     info!("Server stopped");
 }
