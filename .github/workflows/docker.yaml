@@ -2,8 +2,7 @@ name: Build and Push Docker image
 
 on:
   push:
-    branches: ["main"]   # Run when pushing to main
-  workflow_dispatch:     # Allow manual trigger
+    tags: ["v*.*.*"]     # Publish only versioned releases
 
 jobs:
   docker:
@@ -38,10 +37,11 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository_owner }}/tei-proxy:latest
+            ghcr.io/${{ github.repository_owner }}/tei-proxy:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/tei-proxy:${{ env.SHORT_SHA }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=Tiny proxy for Hugginface TEI API
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
