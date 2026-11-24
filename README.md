@@ -38,14 +38,14 @@ Deeper reference material lives in [`docs/`](docs/): the native TEI API structur
 
 ### Arch Linux (x86_64)
 
-The package installs `tei-proxy`. Configure the upstream services using the environment variables above. Executables are installed under `/usr/local/bin`.
+The package installs `tei-proxy`. Configure the upstream services using the environment variables above. Executables are installed under `/usr/bin`.
 
 Download the `.pkg.tar.zst` from [GitHub Releases](https://github.com/delfianto/tei-proxy/releases/latest)
 and install it with `sudo pacman -U ./<package-file>`, or build the package
 from the checksum-verified release archive with `makepkg -si`:
 
 ```sh
-git clone --branch v0.3.0 https://github.com/delfianto/tei-proxy.git
+git clone --branch v0.3.1 https://github.com/delfianto/tei-proxy.git
 cd tei-proxy/arch
 makepkg -si
 ```
