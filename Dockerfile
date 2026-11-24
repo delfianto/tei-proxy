@@ -14,7 +14,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
 # Build release binary with musl
-RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN cargo build --release --locked --target x86_64-unknown-linux-musl
 
 # -------- Stage 2: Minimal Runtime --------
 FROM scratch
