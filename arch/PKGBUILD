@@ -1,5 +1,5 @@
 pkgname=tei-proxy-bin
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc='Reranking and embedding proxy for Hugging Face TEI'
 arch=('x86_64')
@@ -11,10 +11,10 @@ conflicts=('tei-proxy')
 options=('!strip' '!debug')
 _archive="tei-proxy-v$pkgver-linux-x86_64"
 source=("$url/releases/download/v$pkgver/$_archive.tar.gz")
-sha256sums=('a10de274645bbce3bdd8ec02f21207f4100f95d3fde46eaf4e32098e1f6c03d1')
+sha256sums=('bfc475eef4f4105ccd1bfd2024ef0311d5710cf99e9372707d6887d625e23d6d')
 
 package() {
     cd "$srcdir/$_archive"
-    install -Dm0755 tei-proxy "$pkgdir/usr/local/bin/tei-proxy"
+    install -Dm0755 tei-proxy "$pkgdir/usr/bin/tei-proxy"
     install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
