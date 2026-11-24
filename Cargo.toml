@@ -3,6 +3,7 @@ name = "tei-proxy"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.100.0"
+license = "MIT"
 description = "Lightweight proxy bridging OpenWebUI to HuggingFace TEI rerank/embedding services"
 
 [lib]
