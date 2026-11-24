@@ -1,16 +1,17 @@
-pkgname=tei-proxy-bin
+pkgname=tei-proxy
 pkgver=0.3.1
-pkgrel=1
+pkgrel=2
 pkgdesc='Reranking and embedding proxy for Hugging Face TEI'
 arch=('x86_64')
 url='https://github.com/delfianto/tei-proxy'
 license=('MIT')
 depends=('glibc' 'libgcc' 'ca-certificates')
-provides=("tei-proxy=$pkgver")
-conflicts=('tei-proxy')
+provides=("tei-proxy-bin=$pkgver-$pkgrel")
+conflicts=('tei-proxy-bin')
+replaces=('tei-proxy-bin')
 options=('!strip' '!debug')
 _archive="tei-proxy-v$pkgver-linux-x86_64"
-source=("$url/releases/download/v$pkgver/$_archive.tar.gz")
+source=("$url/releases/download/arch-v$pkgver-$pkgrel/$_archive.tar.gz")
 sha256sums=('bfc475eef4f4105ccd1bfd2024ef0311d5710cf99e9372707d6887d625e23d6d')
 
 package() {
