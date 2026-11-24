@@ -40,12 +40,13 @@ Deeper reference material lives in [`docs/`](docs/): the native TEI API structur
 
 The package installs `tei-proxy`. Configure the upstream services using the environment variables above. Executables are installed under `/usr/bin`.
 
-Download the `.pkg.tar.zst` from [GitHub Releases](https://github.com/delfianto/tei-proxy/releases/latest)
-and install it with `sudo pacman -U ./<package-file>`, or build the package
-from the checksum-verified release archive with `makepkg -si`:
+Download the `tei-proxy` package from [GitHub Releases](https://github.com/delfianto/tei-proxy/releases/latest)
+and install it with `sudo pacman -U ./<package-file>`. If pacman asks to remove the
+previous package, answer `y`. You can also build the package from the
+checksum-verified release archive with `makepkg -si`:
 
 ```sh
-git clone --branch v0.3.1 https://github.com/delfianto/tei-proxy.git
+git clone --branch arch-v0.3.1-2 https://github.com/delfianto/tei-proxy.git
 cd tei-proxy/arch
 makepkg -si
 ```
